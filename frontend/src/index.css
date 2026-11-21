@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+@theme {
+  --color-cream: #FEFAE0;
+  --color-cream-dark: #F5F0D0;
+  --color-green-deep: #1B4332;
+  --color-green-primary: #2D6A4F;
+  --color-green-muted: #52B788;
+  --color-green-light: #B7E4C7;
+  --color-green-pale: #D8F3DC;
+  --color-terracotta: #C67B5C;
+  --color-terracotta-light: #E8A87C;
+  --color-warm-gray: #6B705C;
+  --color-warm-gray-light: #A5A58D;
+  --color-danger: #E63946;
+  --color-warning: #E9C46A;
+  --color-info: #457B9D;
+
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-cream text-green-deep font-sans antialiased;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-green-primary text-cream px-6 py-3 rounded-xl font-semibold
+      hover:bg-green-deep transition-colors duration-200
+      focus:outline-none focus:ring-2 focus:ring-green-muted focus:ring-offset-2
+      disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply bg-cream text-green-primary border-2 border-green-primary px-6 py-3
+      rounded-xl font-semibold hover:bg-green-pale transition-colors duration-200
+      focus:outline-none focus:ring-2 focus:ring-green-muted focus:ring-offset-2;
+  }
+  .btn-accent {
+    @apply bg-terracotta text-cream px-6 py-3 rounded-xl font-semibold
+      hover:bg-terracotta-light transition-colors duration-200
+      focus:outline-none focus:ring-2 focus:ring-terracotta-light focus:ring-offset-2;
+  }
+  .card {
+    @apply bg-white rounded-2xl shadow-sm border border-green-pale p-6
+      hover:shadow-md transition-shadow duration-200;
+  }
+  .input-field {
+    @apply w-full px-4 py-3 rounded-xl border-2 border-green-pale bg-white
+      text-green-deep placeholder-warm-gray-light
+      focus:border-green-muted focus:outline-none focus:ring-2 focus:ring-green-muted/30
+      transition-colors duration-200;
+  }
+  .badge {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-sm font-medium;
+  }
+  .badge-green {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-pale text-green-deep;
+  }
+  .badge-terracotta {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-terracotta/10 text-terracotta;
+  }
+  .badge-gray {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-warm-gray-light/20 text-warm-gray;
+  }
+}

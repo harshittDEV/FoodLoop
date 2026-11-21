@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: foodloop-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: FOODLOOP_DB_HOST
+        sync: false
+      - key: FOODLOOP_DB_PORT
+        value: "3306"
+      - key: FOODLOOP_DB_NAME
+        sync: false
+      - key: FOODLOOP_DB_USERNAME
+        sync: false
+      - key: FOODLOOP_DB_PASSWORD
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        value: "onboarding@resend.dev"
+      - key: FOODLOOP_FEEDBACK_TO
+        sync: false
+      - key: FOODLOOP_JWT_SECRET
+        generateValue: true
+      - key: FOODLOOP_JWT_EXPIRATION_MS
+        value: "86400000"
+      - key: FOODLOOP_FRONTEND_URL
+        sync: false
+      - key: FOODLOOP_DEV_LOG_VERIFICATION_LINK
+        value: "false"

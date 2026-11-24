@@ -1,78 +1,84 @@
 package com.foodloop.service;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.foodloop.dto.request.ContactRequest;
 import com.foodloop.exception.ApiException;
-import com.resend.Resend;
-import com.resend.core.exception.ResendException;
-import com.resend.services.emails.model.CreateEmailOptions;
-import com.resend.services.emails.model.CreateEmailResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.HtmlUtils;
 
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 @Service
 public class EmailService {
 
     private static final Logger log = LoggerFactory.getLogger(EmailService.class);
+    private static final String BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
     private static final DateTimeFormatter DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z").withZone(ZoneId.of("UTC"));
 
-    private final Resend resendClient;
+    private final RestClient restClient;
+    private final String fromName;
     private final String fromEmail;
     private final String feedbackTo;
     private final String frontendUrl;
     private final boolean devLogLink;
-    private final boolean resendConfigured;
+    private final boolean brevoConfigured;
 
     public EmailService(
-            @Value("${foodloop.resend.api-key:${RESEND_API_KEY:}}") String apiKey,
-            @Value("${foodloop.resend.from-email:${RESEND_FROM_EMAIL:onboarding@resend.dev}}") String fromEmail,
+            @Value("${foodloop.brevo.api-key:${BREVO_API_KEY:}}") String apiKey,
+            @Value("${foodloop.brevo.from-name:${BREVO_FROM_NAME:FoodLoop}}") String fromName,
+            @Value("${foodloop.brevo.from-email:${BREVO_FROM_EMAIL:noreply@foodloop.example.com}}") String fromEmail,
             @Value("${foodloop.mail.feedback-to:${FOODLOOP_FEEDBACK_TO:harshitsinghh1128@gmail.com}}") String feedbackTo,
             @Value("${foodloop.frontend.url:http://localhost:3000}") String frontendUrl,
             @Value("${foodloop.dev.log-verification-link:false}") boolean devLogLink) {
 
-        this.fromEmail = fromEmail != null && !fromEmail.isBlank() ? fromEmail.trim() : "onboarding@resend.dev";
+        this.fromName = fromName != null && !fromName.isBlank() ? fromName.trim() : "FoodLoop";
+        this.fromEmail = fromEmail != null && !fromEmail.isBlank() ? fromEmail.trim() : "noreply@foodloop.example.com";
         this.feedbackTo = feedbackTo != null && !feedbackTo.isBlank() ? feedbackTo.trim() : "harshitsinghh1128@gmail.com";
         this.frontendUrl = frontendUrl;
         this.devLogLink = devLogLink;
 
         if (apiKey != null && !apiKey.isBlank()) {
-            this.resendConfigured = true;
-            this.resendClient = new Resend(apiKey.trim());
+            this.brevoConfigured = true;
+            this.restClient = RestClient.builder()
+                    .baseUrl(BREVO_API_URL)
+                    .defaultHeader("api-key", apiKey.trim())
+                    .defaultHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .defaultHeader("Accept", MediaType.APPLICATION_JSON_VALUE)
+                    .build();
         } else {
-            this.resendConfigured = false;
-            this.resendClient = null;
+            this.brevoConfigured = false;
+            this.restClient = null;
         }
     }
 
     public boolean isConfigured() {
-        return resendConfigured;
-    }
-
-    private String formatSender(String displayName) {
-        if (fromEmail.contains("<") && fromEmail.contains(">")) {
-            return fromEmail;
-        }
-        return displayName + " <" + fromEmail + ">";
+        return brevoConfigured;
     }
 
     /**
-     * Send verification email to registered user using Resend HTTPS API.
+     * Send verification email to registered user using Brevo HTTPS API.
+     * Verification mail goes directly to the address entered by the signing-up user.
      */
     public void sendVerificationEmail(String toEmail, String userName, String token) {
         String verifyUrl = frontendUrl + "/verify-email?token=" + token;
 
-        if (!resendConfigured) {
+        if (!brevoConfigured) {
             if (devLogLink) {
                 log.warn("╔══════════════════════════════════════════════════════════╗");
-                log.warn("║  Resend not configured — logging verification link (DEV)║");
+                log.warn("║  Brevo not configured — logging verification link (DEV) ║");
                 log.warn("╠══════════════════════════════════════════════════════════╣");
                 log.warn("║  User:  {}",  toEmail);
                 log.warn("║  Link:  {}",  verifyUrl);
@@ -80,7 +86,7 @@ public class EmailService {
                 return;
             }
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
-                "Email delivery is not configured. Please set RESEND_API_KEY in your environment or backend .env file.");
+                "Email delivery is not configured. Please set BREVO_API_KEY in your environment or backend .env file.");
         }
 
         String subject = "Verify your FoodLoop account";
@@ -112,37 +118,23 @@ public class EmailService {
             </div>
             """.formatted(HtmlUtils.htmlEscape(userName), verifyUrl, verifyUrl, verifyUrl);
 
-        try {
-            CreateEmailOptions params = CreateEmailOptions.builder()
-                    .from(formatSender("FoodLoop"))
-                    .to(toEmail)
-                    .subject(subject)
-                    .html(html)
-                    .build();
+        BrevoSender sender = new BrevoSender(fromName, fromEmail);
+        List<BrevoRecipient> recipients = List.of(new BrevoRecipient(toEmail, userName));
+        BrevoEmailRequest requestPayload = new BrevoEmailRequest(sender, recipients, subject, html, null);
 
-            CreateEmailResponse response = resendClient.emails().send(params);
-            log.info("Verification email successfully dispatched to {} via Resend (id: {})", toEmail, response.getId());
-        } catch (ResendException e) {
-            log.error("Resend API error sending verification email to {}: {}", toEmail, e.getMessage());
-            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR,
-                "Failed to send verification email via Resend: " + e.getMessage());
-        } catch (Exception e) {
-            log.error("Unexpected error sending verification email to {}: {}", toEmail, e.getMessage());
-            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR,
-                "Failed to dispatch verification email. Please verify your Resend configuration.");
-        }
+        sendViaBrevo(requestPayload, "verification email", toEmail);
     }
 
     /**
-     * Send a contact form query or feedback message to the admin via Resend HTTPS API.
-     * Sender is ALWAYS the configured RESEND_FROM_EMAIL (never user-supplied).
-     * Recipient is ALWAYS the configured FOODLOOP_FEEDBACK_TO (never user-supplied).
+     * Send a contact form query or feedback message to the admin via Brevo HTTPS API.
+     * Sender is ALWAYS the configured BREVO_FROM_NAME and BREVO_FROM_EMAIL.
+     * Recipient is ALWAYS the configured FOODLOOP_FEEDBACK_TO.
      * Reply-To is set to the submitter's email and name, enabling direct replies.
      */
     public void sendContactEmail(ContactRequest req) {
-        if (!resendConfigured) {
+        if (!brevoConfigured) {
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
-                "Contact form email delivery is not configured. Please set RESEND_API_KEY in your environment or backend .env file.");
+                "Contact form email delivery is not configured. Please set BREVO_API_KEY in your environment or backend .env file.");
         }
 
         String safeName = HtmlUtils.htmlEscape(req.getName());
@@ -189,25 +181,76 @@ public class EmailService {
             </div>
             """.formatted(safeName, safeEmail, safeEmail, safeTopic, formattedDate, safeMessage, safeName, safeEmail);
 
-        try {
-            CreateEmailOptions params = CreateEmailOptions.builder()
-                    .from(formatSender("FoodLoop Contact"))
-                    .to(feedbackTo)
-                    .replyTo(req.getEmail())
-                    .subject(subject)
-                    .html(html)
-                    .build();
+        BrevoSender sender = new BrevoSender(fromName, fromEmail);
+        List<BrevoRecipient> recipients = List.of(new BrevoRecipient(feedbackTo, "FoodLoop Feedback"));
+        BrevoRecipient replyTo = new BrevoRecipient(req.getEmail(), req.getName());
+        BrevoEmailRequest requestPayload = new BrevoEmailRequest(sender, recipients, subject, html, replyTo);
 
-            CreateEmailResponse response = resendClient.emails().send(params);
-            log.info("Contact form email from {} sent to feedback recipient {} via Resend (id: {})", req.getEmail(), feedbackTo, response.getId());
-        } catch (ResendException e) {
-            log.error("Resend API error sending contact email from {}: {}", req.getEmail(), e.getMessage());
-            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR,
-                "Failed to deliver contact message via Resend: " + e.getMessage());
+        sendViaBrevo(requestPayload, "contact/feedback email", feedbackTo);
+    }
+
+    /**
+     * Executes the HTTP POST call to Brevo transactional email API.
+     * Safely logs HTTP status and sanitized error response, avoiding credential or content leaks.
+     */
+    private void sendViaBrevo(BrevoEmailRequest requestPayload, String contextDescription, String destination) {
+        try {
+            BrevoEmailResponse response = restClient.post()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .accept(MediaType.APPLICATION_JSON)
+                    .body(requestPayload)
+                    .retrieve()
+                    .body(BrevoEmailResponse.class);
+
+            String messageId = response != null && response.messageId() != null ? response.messageId() : "unknown";
+            log.info("Dispatched {} successfully to {} via Brevo (messageId: {})", contextDescription, destination, messageId);
+        } catch (RestClientResponseException e) {
+            int statusCode = e.getStatusCode().value();
+            String sanitizedError = sanitizeErrorBody(e.getResponseBodyAsString());
+            log.error("Brevo API error dispatching {} (HTTP status {}): {}", contextDescription, statusCode, sanitizedError);
+            throw new ApiException(HttpStatus.BAD_GATEWAY,
+                    "Failed to deliver email through Brevo. Please verify email service configuration.");
+        } catch (ResourceAccessException e) {
+            log.error("Network connectivity error connecting to Brevo API: {}", e.getMessage());
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Email delivery service is temporarily unreachable. Please try again later.");
         } catch (Exception e) {
-            log.error("Unexpected error sending contact email from {}: {}", req.getEmail(), e.getMessage());
+            log.error("Unexpected error dispatching {} via Brevo: {}", contextDescription, e.getMessage());
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR,
-                "Failed to deliver contact message. Please verify your Resend configuration.");
+                    "An unexpected error occurred while dispatching email.");
         }
     }
+
+    /**
+     * Sanitizes external error response body: trims whitespace, flattens newlines, and truncates.
+     * Ensures secrets or excessive internal payloads are never printed to application logs.
+     */
+    private String sanitizeErrorBody(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "No response body received from Brevo API";
+        }
+        String cleaned = raw.replaceAll("[\\r\\n]+", " ").trim();
+        if (cleaned.length() > 200) {
+            cleaned = cleaned.substring(0, 200) + "...";
+        }
+        return cleaned;
+    }
+
+    // ── Brevo Request & Response Records ─────────────────────────────────
+
+    public record BrevoSender(String name, String email) {}
+
+    public record BrevoRecipient(String email, String name) {}
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record BrevoEmailRequest(
+            BrevoSender sender,
+            List<BrevoRecipient> to,
+            String subject,
+            String htmlContent,
+            BrevoRecipient replyTo
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record BrevoEmailResponse(String messageId) {}
 }
